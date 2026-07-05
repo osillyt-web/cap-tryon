@@ -157,7 +157,7 @@ async function init() {
   faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
     baseOptions: {
       modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
-      delegate: 'GPU',
+      delegate: 'CPU',
     },
     runningMode: 'VIDEO',
     numFaces: 1,
@@ -172,6 +172,8 @@ async function init() {
       video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 840 } }
     });
     video.srcObject = stream;
+    video.setAttribute('playsinline', '');
+    video.setAttribute('muted', '');
     await video.play();
   } catch (e) {
     document.getElementById('status').textContent = 'Ошибка камеры: разреши доступ';
@@ -179,13 +181,27 @@ async function init() {
     return;
   }
 
-  // Wait for video dimensions
-  await new Promise(r => { video.onloadedmetadata = r; });
+  // Wait until video is actually playing with dimensions
+  await new Promise((resolve) => {
+    const check = () => {
+      if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
+        resolve();
+      } else {
+        requestAnimationFrame(check);
+      }
+    };
+    check();
+  });
+
+  // Set canvas size to match video
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
 
   document.getElementById('loader').style.display = 'none';
   document.getElementById('status').textContent = 'Готово!';
 
   running = true;
+  lastVideoTime = -1;
   requestAnimationFrame(loop);
 }
 
@@ -235,11 +251,17 @@ function loop() {
   if (!running) return;
   requestAnimationFrame(loop);
 
-  if (video.currentTime === lastVideoTime) return;
-  lastVideoTime = video.currentTime;
+  // Ensure video has valid dimensions
+  if (video.videoWidth === 0 || video.videoHeight === 0) return;
 
-  const w = canvas.width = video.videoWidth;
-  const h = canvas.height = video.videoHeight;
+  // Match canvas to current video size (handles orientation changes)
+  if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+  }
+
+  const w = canvas.width;
+  const h = canvas.height;
 
   // Detect
   let landmarks = null;
