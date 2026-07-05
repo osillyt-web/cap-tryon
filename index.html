@@ -124,14 +124,21 @@ function loop(){
 }
 
 function drawCap(lm){
-  const f=lm[10],lt=lm[234],rt=lm[454],nb=lm[168];
-  if(!f||!lt||!rt)return;
+  const f=lm[10],lt=lm[234],rt=lm[454];
+  // Eye centers for distance calculation
+  const le=lm[33],re=lm[263];
+  if(!f||!lt||!rt||!le||!re)return;
   const w=c.width,h=c.height;
-  const fw=Math.hypot(rt.x*w-lt.x*w, rt.y*h-lt.y*h);
-  const cw=fw*1.2, ch=fw*0.5;
-  // Position cap ABOVE forehead, centered between temples
+  // Head width from temples
+  const headW=Math.hypot(rt.x*w-lt.x*w, rt.y*h-lt.y*h);
+  // Eye distance for vertical offset
+  const eyeDist=Math.hypot(re.x*w-le.x*w, re.y*h-le.y*h);
+  // Cap size: slightly wider than head
+  const cw=headW*1.3, ch=headW*0.6;
+  // Position: centered between temples, above forehead
   const cx0=(lt.x*w+rt.x*w)/2;
-  const cy0=f.y*h - ch*0.35; // top of cap near forehead
+  const foreY=f.y*h;
+  const cy0=foreY - eyeDist*1.2; // lift above head
   const ang=Math.atan2(rt.y*h-lt.y*h, rt.x*w-lt.x*w);
   cx.save();cx.translate(cx0,cy0);cx.rotate(ang);
   const hw=cw/2, hh=ch;
