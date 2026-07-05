@@ -25,46 +25,29 @@
     max-width: 480px;
     aspect-ratio: 3/4;
     max-height: 75vh;
+    background: #111;
+    border-radius: 12px;
+    overflow: hidden;
   }
   canvas {
     position: absolute;
     top: 0; left: 0;
     width: 100%; height: 100%;
     object-fit: cover;
-    border-radius: 12px;
-    transform: scaleX(-1); /* mirror */
-  }
-  video {
-    position: absolute;
-    top: 0; left: 0;
-    width: 100%; height: 100%;
-    object-fit: cover;
-    border-radius: 12px;
     transform: scaleX(-1);
-    opacity: 0; /* video feeds into canvas only */
-    pointer-events: none;
   }
-  #loader {
+  #debug {
     position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #fff;
-    font-size: 16px;
-    z-index: 10;
-    background: rgba(0,0,0,0.6);
-    border-radius: 12px;
+    top: 8px; left: 8px;
+    color: #0f0;
+    font-size: 12px;
+    font-family: monospace;
+    z-index: 20;
+    background: rgba(0,0,0,0.7);
+    padding: 4px 8px;
+    border-radius: 4px;
+    white-space: pre-wrap;
   }
-  .spinner {
-    width: 36px; height: 36px;
-    border: 3px solid rgba(255,255,255,0.3);
-    border-top-color: #FFD966;
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-    margin-right: 12px;
-  }
-  @keyframes spin { to { transform: rotate(360deg); } }
   #picker {
     display: flex;
     gap: 12px;
@@ -79,28 +62,9 @@
     border: 3px solid #555;
     cursor: pointer;
     transition: transform 0.15s, border-color 0.15s;
-    position: relative;
-    background: transparent;
   }
   .cap-btn.active { border-color: #FFD966; transform: scale(1.15); }
-  .cap-btn img { width: 100%; height: 100%; object-fit: contain; }
-  #controls {
-    display: flex;
-    gap: 12px;
-    margin-top: 12px;
-  }
-  button {
-    background: #FFD966;
-    color: #000;
-    border: none;
-    padding: 12px 28px;
-    border-radius: 24px;
-    font-size: 16px;
-    font-weight: 700;
-    cursor: pointer;
-    touch-action: manipulation;
-  }
-  button:active { opacity: 0.8; }
+  .cap-btn canvas { width: 100%; height: 100%; }
   #status {
     color: #aaa;
     font-size: 13px;
@@ -112,9 +76,8 @@
 <body>
 
 <div id="main">
-  <video id="video" playsinline autoplay muted></video>
   <canvas id="canvas"></canvas>
-  <div id="loader"><div class="spinner"></div>Загружаю...</div>
+  <div id="debug">Загрузка...</div>
 </div>
 
 <div id="picker"></div>
@@ -131,77 +94,153 @@ const caps = [
   { name: 'Синяя',    top: '#2471a3', brim: '#1a5276', band: '#2980b9' },
   { name: 'Бежевая',  top: '#d4b895', brim: '#b8956e', band: '#c9a87c' },
   { name: 'Зелёная',  top: '#1e8449', brim: '#145a32', band: '#239b56' },
-  { name: 'Серая',    top: '#7f8c8d', brim: '#626b6c', band: '#95a5a6' },
+  { name: 'Серая',    top: '#7f8c8d', brim: '#626b6c', band: '#95a6a6' },
 ];
 let activeCap = 0;
 
 // ── State ─────────────────────────────────────
 let faceLandmarker = null;
-let canvas, ctx, video;
+let canvas, ctx;
 let running = false;
-let lastVideoTime = -1;
+let debugEl;
+let frameCount = 0;
+let detectCount = 0;
+let lastDebug = '';
+
+function debug(msg) {
+  lastDebug = msg;
+  if (debugEl) debugEl.textContent = msg;
+  console.log(msg);
+}
 
 // ── Init ──────────────────────────────────────
 async function init() {
   canvas = document.getElementById('canvas');
   ctx = canvas.getContext('2d');
-  video = document.getElementById('video');
+  debugEl = document.getElementById('debug');
 
   buildPicker();
 
+  // Create hidden video element
+  const video = document.createElement('video');
+  video.setAttribute('playsinline', '');
+  video.setAttribute('autoplay', '');
+  video.setAttribute('muted', '');
+  video.style.display = 'none';
+  document.body.appendChild(video);
+
   // Load MediaPipe
-  document.getElementById('status').textContent = 'Загружаю модель...';
-  const vision = await FilesetResolver.forVisionTasks(
-    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm'
-  );
-  faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
-    baseOptions: {
-      modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
-      delegate: 'CPU',
-    },
-    runningMode: 'VIDEO',
-    numFaces: 1,
-    outputFaceBlendshapes: false,
-    outputFacialTransformationMatrixes: false,
-  });
+  debug('1. Загружаю модель...');
+  try {
+    const vision = await FilesetResolver.forVisionTasks(
+      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm'
+    );
+    faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+        delegate: 'CPU',
+      },
+      runningMode: 'VIDEO',
+      numFaces: 1,
+      outputFaceBlendshapes: false,
+      outputFacialTransformationMatrixes: false,
+    });
+    debug('2. Модель загружена ✅');
+  } catch(e) {
+    debug('ОШИБКА модели: ' + e.message);
+    return;
+  }
 
   // Start camera
-  document.getElementById('status').textContent = 'Запускаю камеру...';
+  debug('3. Запускаю камеру...');
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 840 } }
     });
     video.srcObject = stream;
-    video.setAttribute('playsinline', '');
-    video.setAttribute('muted', '');
     await video.play();
+    debug('4. Камера запущена ✅');
   } catch (e) {
-    document.getElementById('status').textContent = 'Ошибка камеры: разреши доступ';
-    document.getElementById('loader').style.display = 'none';
+    debug('ОШИБКА камеры: ' + e.message);
     return;
   }
 
-  // Wait until video is actually playing with dimensions
-  await new Promise((resolve) => {
-    const check = () => {
-      if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
-        resolve();
-      } else {
-        requestAnimationFrame(check);
-      }
-    };
-    check();
-  });
+  // Wait for video dimensions
+  debug('5. Жду размеры видео...');
+  if (video.readyState >= 2 && video.videoWidth > 0) {
+    debug('6. Размеры сразу: ' + video.videoWidth + 'x' + video.videoHeight);
+  } else {
+    await new Promise((resolve, reject) => {
+      let tries = 0;
+      const check = () => {
+        tries++;
+        if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
+          debug('6. Размеры после ' + tries + ' попыток: ' + video.videoWidth + 'x' + video.videoHeight);
+          resolve();
+        } else if (tries > 200) {
+          reject(new Error('Таймаут: readyState=' + video.readyState + ' size=' + video.videoWidth + 'x' + video.videoHeight));
+        } else {
+          requestAnimationFrame(check);
+        }
+      };
+      check();
+    });
+  }
 
-  // Set canvas size to match video
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
+  debug('7. Canvas: ' + canvas.width + 'x' + canvas.height);
 
-  document.getElementById('loader').style.display = 'none';
   document.getElementById('status').textContent = 'Готово!';
 
+  // ── Main loop ─────────────────────────────────
+  function loop() {
+    if (!running) return;
+    requestAnimationFrame(loop);
+    frameCount++;
+
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    if (vw === 0 || vh === 0) return;
+
+    if (canvas.width !== vw || canvas.height !== vh) {
+      canvas.width = vw;
+      canvas.height = vh;
+    }
+
+    // Always draw video first
+    ctx.save();
+    ctx.clearRect(0, 0, vw, vh);
+    ctx.drawImage(video, 0, 0, vw, vh);
+    ctx.restore();
+
+    // Detect face (if model ready)
+    let landmarks = null;
+    if (faceLandmarker) {
+      try {
+        const result = faceLandmarker.detectForVideo(video, performance.now());
+        if (result.faceLandmarks && result.faceLandmarks.length > 0) {
+          landmarks = result.faceLandmarks[0];
+          detectCount++;
+        }
+      } catch(e) {
+        // silently skip detection errors
+      }
+    }
+
+    // Draw cap
+    if (landmarks) {
+      drawCap(landmarks, vw, vh);
+    }
+
+    // Update debug every 30 frames
+    if (frameCount % 30 === 0) {
+      const fps = detectCount > 0 ? '👤' : '🔍';
+      debug(`Кадр:${frameCount} | ${vw}x${vh} | ${fps} лиц:${detectCount}`);
+    }
+  }
+
   running = true;
-  lastVideoTime = -1;
   requestAnimationFrame(loop);
 }
 
@@ -212,7 +251,6 @@ function buildPicker() {
     const btn = document.createElement('div');
     btn.className = 'cap-btn' + (i === activeCap ? ' active' : '');
 
-    // Draw preview
     const c = document.createElement('canvas');
     c.width = 60; c.height = 60;
     const cx = c.getContext('2d');
@@ -230,15 +268,12 @@ function buildPicker() {
 
 function drawCapPreview(cx, x, y, w, cap) {
   const h = w * 0.45;
-  // Top dome
   cx.fillStyle = cap.top;
   cx.beginPath();
   cx.ellipse(x, y, w/2, h*0.75, 0, Math.PI, 0);
   cx.fill();
-  // Band
   cx.fillStyle = cap.band;
   cx.fillRect(x - w/2, y - 2, w, h * 0.22);
-  // Brim
   cx.fillStyle = cap.brim;
   cx.beginPath();
   cx.ellipse(x, y + h*0.45, w/2 + 6, h*0.35, 0, Math.PI*0.7, Math.PI*0.3);
@@ -246,56 +281,12 @@ function drawCapPreview(cx, x, y, w, cap) {
   cx.fill();
 }
 
-// ── Main loop ─────────────────────────────────
-function loop() {
-  if (!running) return;
-  requestAnimationFrame(loop);
-
-  // Ensure video has valid dimensions
-  if (video.videoWidth === 0 || video.videoHeight === 0) return;
-
-  // Match canvas to current video size (handles orientation changes)
-  if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-  }
-
-  const w = canvas.width;
-  const h = canvas.height;
-
-  // Detect
-  let landmarks = null;
-  try {
-    const result = faceLandmarker.detectForVideo(video, performance.now());
-    if (result.faceLandmarks.length > 0) {
-      landmarks = result.faceLandmarks[0];
-    }
-  } catch (e) { /* skip */ }
-
-  // Draw video
-  ctx.save();
-  ctx.clearRect(0, 0, w, h);
-  ctx.drawImage(video, 0, 0, w, h);
-
-  if (landmarks) {
-    drawCap(landmarks, w, h);
-    document.getElementById('status').textContent = '✅';
-  } else {
-    document.getElementById('status').textContent = 'Лицо не найдено';
-  }
-
-  ctx.restore();
-}
-
 // ── Draw cap ──────────────────────────────────
 function drawCap(landmarks, w, h) {
   const cap = caps[activeCap];
-
-  // Key landmarks
-  const forehead = landmarks[10];        // верх лба
-  const leftTemple = landmarks[234];     // левый висок
-  const rightTemple = landmarks[454];    // правый висок
-  const noseTip = landmarks[1];          // кончик носа
+  const forehead = landmarks[10];
+  const leftTemple = landmarks[234];
+  const rightTemple = landmarks[454];
 
   if (!forehead || !leftTemple || !rightTemple) return;
 
@@ -306,17 +297,12 @@ function drawCap(landmarks, w, h) {
   const rx = rightTemple.x * w;
   const ry = rightTemple.y * h;
 
-  // Center and width
   const cx = (lx + rx) / 2;
   const cy = (ly + ry) / 2 - 8;
   const faceWidth = Math.hypot(rx - lx, ry - ly);
-
-  // Cap dimensions
   const capWidth = faceWidth * 1.55;
   const capHeight = faceWidth * 0.65;
   const capTop = cy - capHeight * 0.55;
-
-  // Rotation angle
   const angle = Math.atan2(ry - ly, rx - lx);
 
   ctx.save();
@@ -326,7 +312,7 @@ function drawCap(landmarks, w, h) {
   const w2 = capWidth / 2;
   const h2 = capHeight;
 
-  // ── Dome ──
+  // Dome
   ctx.fillStyle = cap.top;
   ctx.beginPath();
   ctx.moveTo(-w2, 0);
@@ -336,12 +322,12 @@ function drawCap(landmarks, w, h) {
   ctx.closePath();
   ctx.fill();
 
-  // ── Band ──
+  // Band
   const bandH = h2 * 0.18;
   ctx.fillStyle = cap.band;
   ctx.fillRect(-w2 - 1, -bandH, capWidth + 2, bandH);
 
-  // ── Brim ──
+  // Brim
   ctx.fillStyle = cap.brim;
   ctx.beginPath();
   ctx.moveTo(-w2 - capWidth * 0.08, 0);
@@ -350,7 +336,7 @@ function drawCap(landmarks, w, h) {
   ctx.quadraticCurveTo(0, h2 * 0.15, -w2 - capWidth * 0.08, 0);
   ctx.fill();
 
-  // ── Top button ──
+  // Top button
   ctx.fillStyle = cap.band;
   ctx.beginPath();
   ctx.arc(0, -h2 * 1.02, capWidth * 0.04, 0, Math.PI * 2);
@@ -360,7 +346,10 @@ function drawCap(landmarks, w, h) {
 }
 
 // ── Start ─────────────────────────────────────
-init();
+init().catch(e => {
+  debug('КРИТИЧЕСКАЯ ОШИБКА: ' + e.message);
+  console.error(e);
+});
 
 </script>
 </body>
