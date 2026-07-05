@@ -124,18 +124,21 @@ function loop(){
 }
 
 function drawCap(lm){
-  const f=lm[10],lt=lm[234],rt=lm[454];
+  const f=lm[10],lt=lm[234],rt=lm[454],nb=lm[168];
   if(!f||!lt||!rt)return;
   const w=c.width,h=c.height;
-  const cx0=(lt.x*w+rt.x*w)/2,cy0=(lt.y*h+rt.y*h)/2-8;
-  const fw=Math.hypot(rt.x*w-lt.x*w,rt.y*h-lt.y*h);
-  const cw=fw*1.55,ch=fw*0.65,top=cy0-ch*0.55,ang=Math.atan2(rt.y*h-lt.y*h,rt.x*w-lt.x*w);
-  cx.save();cx.translate(cx0,top+ch*0.15);cx.rotate(ang);
-  const hw=cw/2,hh=ch;
+  const fw=Math.hypot(rt.x*w-lt.x*w, rt.y*h-lt.y*h);
+  const cw=fw*1.2, ch=fw*0.5;
+  // Position cap ABOVE forehead, centered between temples
+  const cx0=(lt.x*w+rt.x*w)/2;
+  const cy0=f.y*h - ch*0.35; // top of cap near forehead
+  const ang=Math.atan2(rt.y*h-lt.y*h, rt.x*w-lt.x*w);
+  cx.save();cx.translate(cx0,cy0);cx.rotate(ang);
+  const hw=cw/2, hh=ch;
   cx.fillStyle=caps[active];cx.beginPath();cx.moveTo(-hw,0);cx.quadraticCurveTo(-hw,-hh*.85,-hw*.15,-hh*.9);cx.quadraticCurveTo(0,-hh*1.05,hw*.15,-hh*.9);cx.quadraticCurveTo(hw,-hh*.85,hw,0);cx.closePath();cx.fill();
-  cx.fillStyle='rgba(255,255,255,0.3)';cx.fillRect(-hw-1,-hh*.18,cw+2,hh*.18);
-  cx.fillStyle='#111';cx.beginPath();cx.moveTo(-hw-cw*.08,0);cx.quadraticCurveTo(-hw*.5,hh*.35,0,hh*.48);cx.quadraticCurveTo(hw*.5,hh*.35,hw+cw*.08,0);cx.quadraticCurveTo(0,hh*.15,-hw-cw*.08,0);cx.fill();
-  cx.fillStyle='#333';cx.beginPath();cx.arc(0,-hh*1.02,cw*.04,0,Math.PI*2);cx.fill();
+  cx.fillStyle='rgba(255,255,255,0.25)';cx.fillRect(-hw-1,-hh*.16,cw+2,hh*.16);
+  cx.fillStyle='#111';cx.beginPath();cx.moveTo(-hw-cw*.06,0);cx.quadraticCurveTo(-hw*.4,hh*.3,0,hh*.4);cx.quadraticCurveTo(hw*.4,hh*.3,hw+cw*.06,0);cx.quadraticCurveTo(0,hh*.1,-hw-cw*.06,0);cx.fill();
+  cx.fillStyle='#333';cx.beginPath();cx.arc(0,-hh*1.02,cw*.035,0,Math.PI*2);cx.fill();
   cx.restore();
 }
 </script>
