@@ -3,239 +3,42 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Примерка кепок 👒</title>
+<title>Камера</title>
 <style>
-  * { margin:0; padding:0; box-sizing:border-box; }
-  body { background:#000; font-family:system-ui,sans-serif; height:100dvh; display:flex; flex-direction:column; align-items:center; justify-content:center; user-select:none; -webkit-user-select:none; touch-action:manipulation; }
-  #main { width:100vw; max-width:480px; aspect-ratio:3/4; max-height:75vh; position:relative; border-radius:12px; overflow:hidden; background:#111; }
-  canvas { position:absolute; top:0; left:0; width:100%; height:100%; object-fit:cover; transform:scaleX(-1); }
-  #start { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:10; background:rgba(0,0,0,0.85); border-radius:12px; cursor:pointer; }
-  #start h1 { color:#FFD966; font-size:24px; margin-bottom:12px; }
-  #start p { color:#ccc; font-size:14px; text-align:center; padding:0 24px; }
-  #picker { display:flex; gap:12px; margin-top:16px; flex-wrap:wrap; justify-content:center; padding:0 16px; }
-  .cap-btn { width:56px; height:56px; border-radius:50%; border:3px solid #555; cursor:pointer; transition:transform 0.15s,border-color 0.15s; }
-  .cap-btn.active { border-color:#FFD966; transform:scale(1.15); }
-  .cap-btn canvas { width:100%; height:100%; }
-  #status { color:#aaa; font-size:13px; margin-top:8px; min-height:20px; }
+  * {margin:0;padding:0;box-sizing:border-box;}
+  body {background:#000;display:flex;align-items:center;justify-content:center;height:100dvh;flex-direction:column;}
+  video {width:100vw;max-width:480px;aspect-ratio:3/4;max-height:75vh;object-fit:cover;border-radius:12px;transform:scaleX(-1);background:#222;}
+  button {margin-top:20px;padding:16px 40px;font-size:18px;border:none;border-radius:30px;background:#FFD966;color:#000;font-weight:700;cursor:pointer;}
+  #msg {color:#fff;margin-top:10px;font:14px monospace;}
 </style>
 </head>
 <body>
+<video id="v" playsinline autoplay muted></video>
+<button id="btn">Начать / Разрешить камеру</button>
+<div id="msg"></div>
+<script>
+const v = document.getElementById('v');
+const btn = document.getElementById('btn');
+const msg = document.getElementById('msg');
 
-<div id="main">
-  <canvas id="canvas"></canvas>
-  <div id="start">
-    <h1>👒 Примерка кепок</h1>
-    <p>Нажми чтобы начать — нужно разрешение на камеру</p>
-  </div>
-</div>
+function log(s) { msg.textContent = s; console.log(s); }
 
-<div id="picker"></div>
-<div id="status">Выбери кепку и нажми «Начать»</div>
-
-<script type="module">
-// ── Caps ──────────────────────────────────────
-const caps = [
-  { name:'Чёрная',  top:'#1a1a1a', brim:'#111', band:'#333' },
-  { name:'Красная', top:'#c0392b', brim:'#922b21', band:'#a93226' },
-  { name:'Синяя',   top:'#2471a3', brim:'#1a5276', band:'#2980b9' },
-  { name:'Бежевая', top:'#d4b895', brim:'#b8956e', band:'#c9a87c' },
-  { name:'Зелёная', top:'#1e8449', brim:'#145a32', band:'#239b56' },
-  { name:'Серая',   top:'#7f8c8d', brim:'#626b6c', band:'#95a6a6' },
-];
-let activeCap = 0;
-
-const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d');
-const startBtn = document.getElementById('start');
-const statusEl = document.getElementById('status');
-
-let faceLandmarker = null;
-let video = null;
-let stream = null;
-let running = false;
-
-// ── Build picker ──────────────────────────────
-function buildPicker() {
-  const picker = document.getElementById('picker');
-  caps.forEach((cap, i) => {
-    const btn = document.createElement('div');
-    btn.className = 'cap-btn' + (i === activeCap ? ' active' : '');
-    const c = document.createElement('canvas');
-    c.width = 56; c.height = 56;
-    const cx = c.getContext('2d');
-    const w = 44, x = 28, y = 30;
-    cx.fillStyle = cap.top;
-    cx.beginPath(); cx.ellipse(x, y, w/2, w*0.35, 0, Math.PI, 0); cx.fill();
-    cx.fillStyle = cap.band;
-    cx.fillRect(x-w/2, y-2, w, w*0.1);
-    cx.fillStyle = cap.brim;
-    cx.beginPath(); cx.ellipse(x, y+w*0.16, w/2+5, w*0.15, 0, Math.PI*0.7, Math.PI*0.3); cx.fill();
-    btn.appendChild(c);
-    btn.onclick = () => {
-      document.querySelectorAll('.cap-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      activeCap = i;
-    };
-    picker.appendChild(btn);
+btn.onclick = function() {
+  log('Запрашиваю камеру...');
+  navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:640},height:{ideal:840}}})
+  .then(function(stream) {
+    log('Поток получен!');
+    v.srcObject = stream;
+    return v.play();
+  })
+  .then(function() {
+    log('Видео играет! Размер: '+v.videoWidth+'x'+v.videoHeight);
+    btn.style.display = 'none';
+  })
+  .catch(function(e) {
+    log('ОШИБКА: '+e.name+' - '+e.message);
   });
-}
-buildPicker();
-
-// ── Load MediaPipe in background ──────────────
-async function loadModel() {
-  statusEl.textContent = 'Загружаю ИИ...';
-  const { FaceLandmarker, FilesetResolver } = await import(
-    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/+esm'
-  );
-  const vision = await FilesetResolver.forVisionTasks(
-    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm'
-  );
-  faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
-    baseOptions: {
-      modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
-      delegate: 'CPU',
-    },
-    runningMode: 'VIDEO',
-    numFaces: 1,
-    outputFaceBlendshapes: false,
-    outputFacialTransformationMatrixes: false,
-  });
-  statusEl.textContent = 'ИИ готов ✅';
-}
-
-// ── Start camera ──────────────────────────────
-async function startCamera() {
-  statusEl.textContent = 'Запускаю камеру...';
-
-  video = document.createElement('video');
-  video.setAttribute('playsinline', '');
-  video.setAttribute('autoplay', '');
-  video.setAttribute('muted', '');
-  video.style.display = 'none';
-  document.body.appendChild(video);
-
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode:'user', width:{ideal:640}, height:{ideal:840} }
-    });
-    video.srcObject = stream;
-    await video.play();
-  } catch(e) {
-    statusEl.textContent = 'Ошибка: ' + e.message;
-    startBtn.style.display = 'flex';
-    return;
-  }
-
-  // Wait for dimensions
-  await new Promise(resolve => {
-    const check = () => {
-      if (video.videoWidth > 0 && video.videoHeight > 0) resolve();
-      else requestAnimationFrame(check);
-    };
-    check();
-  });
-
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-  startBtn.style.display = 'none';
-  statusEl.textContent = 'Камера работает!';
-
-  running = true;
-  requestAnimationFrame(loop);
-}
-
-// ── Main loop ─────────────────────────────────
-let detectCount = 0;
-function loop() {
-  if (!running || !video) return;
-  requestAnimationFrame(loop);
-
-  const vw = video.videoWidth;
-  const vh = video.videoHeight;
-  if (!vw || !vh) return;
-
-  if (canvas.width !== vw || canvas.height !== vh) {
-    canvas.width = vw;
-    canvas.height = vh;
-  }
-
-  // Draw video
-  ctx.drawImage(video, 0, 0, vw, vh);
-
-  // Detect face
-  if (faceLandmarker) {
-    try {
-      const result = faceLandmarker.detectForVideo(video, performance.now());
-      if (result.faceLandmarks?.length > 0) {
-        drawCap(result.faceLandmarks[0], vw, vh);
-        detectCount++;
-        if (detectCount % 30 === 0) statusEl.textContent = '👤 Лицо найдено';
-      }
-    } catch(e) { /* skip */ }
-  }
-}
-
-// ── Draw cap ──────────────────────────────────
-function drawCap(landmarks, w, h) {
-  const cap = caps[activeCap];
-  const f = landmarks[10], lt = landmarks[234], rt = landmarks[454];
-  if (!f || !lt || !rt) return;
-
-  const cx = (lt.x*w + rt.x*w)/2;
-  const cy = (lt.y*h + rt.y*h)/2 - 8;
-  const fw = Math.hypot(rt.x*w - lt.x*w, rt.y*h - lt.y*h);
-  const cw = fw * 1.55;
-  const ch = fw * 0.65;
-  const top = cy - ch * 0.55;
-  const angle = Math.atan2(rt.y*h - lt.y*h, rt.x*w - lt.x*w);
-
-  ctx.save();
-  ctx.translate(cx, top + ch*0.15);
-  ctx.rotate(angle);
-
-  const hw = cw/2, hh = ch;
-  // Dome
-  ctx.fillStyle = cap.top;
-  ctx.beginPath();
-  ctx.moveTo(-hw, 0);
-  ctx.quadraticCurveTo(-hw, -hh*0.85, -hw*0.15, -hh*0.9);
-  ctx.quadraticCurveTo(0, -hh*1.05, hw*0.15, -hh*0.9);
-  ctx.quadraticCurveTo(hw, -hh*0.85, hw, 0);
-  ctx.closePath(); ctx.fill();
-
-  // Band
-  ctx.fillStyle = cap.band;
-  ctx.fillRect(-hw-1, -hh*0.18, cw+2, hh*0.18);
-
-  // Brim
-  ctx.fillStyle = cap.brim;
-  ctx.beginPath();
-  ctx.moveTo(-hw-cw*0.08, 0);
-  ctx.quadraticCurveTo(-hw*0.5, hh*0.35, 0, hh*0.48);
-  ctx.quadraticCurveTo(hw*0.5, hh*0.35, hw+cw*0.08, 0);
-  ctx.quadraticCurveTo(0, hh*0.15, -hw-cw*0.08, 0);
-  ctx.fill();
-
-  // Button
-  ctx.fillStyle = cap.band;
-  ctx.beginPath();
-  ctx.arc(0, -hh*1.02, cw*0.04, 0, Math.PI*2);
-  ctx.fill();
-
-  ctx.restore();
-}
-
-// ── Click to start ────────────────────────────
-startBtn.onclick = async () => {
-  startBtn.style.display = 'none';
-  await startCamera();
-  // If camera failed, show button again
-  if (!running) startBtn.style.display = 'flex';
 };
-
-// ── Preload model ─────────────────────────────
-loadModel();
-
 </script>
 </body>
 </html>
