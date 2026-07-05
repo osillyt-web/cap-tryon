@@ -3,42 +3,113 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Камера</title>
+<title>Примерка кепок 👒</title>
 <style>
   * {margin:0;padding:0;box-sizing:border-box;}
-  body {background:#000;display:flex;align-items:center;justify-content:center;height:100dvh;flex-direction:column;}
-  video {width:100vw;max-width:480px;aspect-ratio:3/4;max-height:75vh;object-fit:cover;border-radius:12px;transform:scaleX(-1);background:#222;}
-  button {margin-top:20px;padding:16px 40px;font-size:18px;border:none;border-radius:30px;background:#FFD966;color:#000;font-weight:700;cursor:pointer;}
-  #msg {color:#fff;margin-top:10px;font:14px monospace;}
+  body {background:#000;height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:system-ui,sans-serif;}
+  #box {width:100vw;max-width:480px;aspect-ratio:3/4;max-height:75vh;position:relative;border-radius:12px;overflow:hidden;background:#111;}
+  video, canvas {position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);}
+  #overlay {position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.8);z-index:5;border-radius:12px;flex-direction:column;gap:12px;}
+  #overlay button {padding:14px 32px;font-size:16px;font-weight:700;border:none;border-radius:26px;background:#FFD966;color:#000;cursor:pointer;}
+  #overlay p {color:#fff;font-size:13px;text-align:center;padding:0 20px;}
+  #msg {color:#fff;font:13px monospace;margin-top:8px;}
+  #picker {display:flex;gap:10px;margin-top:12px;flex-wrap:wrap;justify-content:center;}
+  .c {width:50px;height:50px;border-radius:50%;border:3px solid #555;cursor:pointer;transition:.15s;}
+  .c.sel {border-color:#FFD966;transform:scale(1.15);}
 </style>
 </head>
 <body>
-<video id="v" playsinline autoplay muted></video>
-<button id="btn">Начать / Разрешить камеру</button>
+<div id="box">
+  <video id="v" playsinline autoplay muted></video>
+  <canvas id="c"></canvas>
+  <div id="overlay"><p style="font-size:16px;color:#FFD966;font-weight:700;">👒 Примерка кепок</p><p>Разреши камеру и примерь!</p><p style="font-size:11px;color:#aaa;">⚠️ Выбери <b style="color:#fff;">«Разрешить, когда я на сайте»</b><br>(первая кнопка), а не «в этот раз»</p><button id="btn">🎥 Включить камеру</button></div>
+</div>
+<div id="picker"></div>
 <div id="msg"></div>
 <script>
-const v = document.getElementById('v');
-const btn = document.getElementById('btn');
-const msg = document.getElementById('msg');
+const v=document.getElementById('v'), c=document.getElementById('c'), cx=c.getContext('2d');
+const btn=document.getElementById('btn'), overlay=document.getElementById('overlay'), msg=document.getElementById('msg');
+let caps=['#1a1a1a','#c0392b','#2471a3','#d4b895','#1e8449','#7f8c8d'];
+let active=0, running=false, lm=null;
 
-function log(s) { msg.textContent = s; console.log(s); }
+// Picker
+caps.forEach((clr,i)=>{
+  const d=document.createElement('div');
+  d.className='c'+(i===0?' sel':'');
+  d.style.background=clr;
+  d.onclick=()=>{document.querySelectorAll('.c').forEach(e=>e.classList.remove('sel'));d.classList.add('sel');active=i;};
+  document.getElementById('picker').appendChild(d);
+});
 
-btn.onclick = function() {
-  log('Запрашиваю камеру...');
-  navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:640},height:{ideal:840}}})
-  .then(function(stream) {
-    log('Поток получен!');
-    v.srcObject = stream;
-    return v.play();
-  })
-  .then(function() {
-    log('Видео играет! Размер: '+v.videoWidth+'x'+v.videoHeight);
-    btn.style.display = 'none';
-  })
-  .catch(function(e) {
-    log('ОШИБКА: '+e.name+' - '+e.message);
+function log(s){msg.textContent=s;console.log(s);}
+
+// Try camera automatically (for when permission was already granted)
+async function tryAuto() {
+  try {
+    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:640},height:{ideal:840}}});
+    await startWithStream(stream);
+    return true;
+  } catch(e) {
+    log('Нужно разрешение камеры');
+    return false;
+  }
+}
+
+async function startWithStream(stream) {
+  v.srcObject=stream;
+  await v.play();
+  await new Promise(r=>{const ch=()=>{if(v.videoWidth>0)r();else requestAnimationFrame(ch);};ch();});
+  c.width=v.videoWidth; c.height=v.videoHeight;
+  overlay.style.display='none';
+  log('Камера работает!');
+  running=true;
+  // Load MediaPipe in background
+  import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/+esm').then(async m=>{
+    const vision=await m.FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm');
+    lm=await m.FaceLandmarker.createFromOptions(vision,{baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',delegate:'CPU'},runningMode:'VIDEO',numFaces:1,outputFaceBlendshapes:false,outputFacialTransformationMatrixes:false});
+    log('ИИ готов ✅');
   });
+  requestAnimationFrame(loop);
+}
+
+btn.onclick=async ()=>{
+  btn.textContent='Жди...';
+  try {
+    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:640},height:{ideal:840}}});
+    await startWithStream(stream);
+  } catch(e) {
+    log('Ошибка: '+e.message);
+    btn.textContent='🎥 Включить камеру';
+  }
 };
+
+function loop() {
+  if(!running)return;
+  requestAnimationFrame(loop);
+  if(!v.videoWidth)return;
+  if(c.width!==v.videoWidth||c.height!==v.videoHeight){c.width=v.videoWidth;c.height=v.videoHeight;}
+  cx.drawImage(v,0,0,c.width,c.height);
+  if(lm){try{const r=lm.detectForVideo(v,performance.now());if(r.faceLandmarks?.length>0)drawCap(r.faceLandmarks[0]);}catch(e){}}
+}
+
+function drawCap(lm) {
+  const f=lm[10],lt=lm[234],rt=lm[454];
+  if(!f||!lt||!rt)return;
+  const w=c.width,h=c.height;
+  const cx0=(lt.x*w+rt.x*w)/2,cy0=(lt.y*h+rt.y*h)/2-8;
+  const fw=Math.hypot(rt.x*w-lt.x*w,rt.y*h-lt.y*h);
+  const cw=fw*1.55,ch=fw*0.65,top=cy0-ch*0.55,ang=Math.atan2(rt.y*h-lt.y*h,rt.x*w-lt.x*w);
+  cx.save();cx.translate(cx0,top+ch*0.15);cx.rotate(ang);
+  const hw=cw/2,hh=ch;
+  cx.fillStyle=caps[active];cx.beginPath();cx.moveTo(-hw,0);cx.quadraticCurveTo(-hw,-hh*.85,-hw*.15,-hh*.9);cx.quadraticCurveTo(0,-hh*1.05,hw*.15,-hh*.9);cx.quadraticCurveTo(hw,-hh*.85,hw,0);cx.closePath();cx.fill();
+  cx.fillStyle='rgba(255,255,255,0.3)';cx.fillRect(-hw-1,-hh*.18,cw+2,hh*.18);
+  cx.fillStyle='#111';cx.beginPath();cx.moveTo(-hw-cw*.08,0);cx.quadraticCurveTo(-hw*.5,hh*.35,0,hh*.48);cx.quadraticCurveTo(hw*.5,hh*.35,hw+cw*.08,0);cx.quadraticCurveTo(0,hh*.15,-hw-cw*.08,0);cx.fill();
+  cx.fillStyle='#333';cx.beginPath();cx.arc(0,-hh*1.02,cw*.04,0,Math.PI*2);cx.fill();
+  cx.restore();
+}
+
+// Auto-try on load
+tryAuto();
 </script>
 </body>
 </html>
