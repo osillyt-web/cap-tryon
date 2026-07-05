@@ -5,32 +5,38 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>Примерка кепок 👒</title>
 <style>
-  * {margin:0;padding:0;box-sizing:border-box;}
-  body {background:#000;height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:system-ui,sans-serif;}
-  #box {width:100vw;max-width:480px;aspect-ratio:3/4;max-height:75vh;position:relative;border-radius:12px;overflow:hidden;background:#111;}
-  video, canvas {position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);}
-  #overlay {position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.8);z-index:5;border-radius:12px;flex-direction:column;gap:12px;}
-  #overlay button {padding:14px 32px;font-size:16px;font-weight:700;border:none;border-radius:26px;background:#FFD966;color:#000;cursor:pointer;}
-  #overlay p {color:#fff;font-size:13px;text-align:center;padding:0 20px;}
-  #msg {color:#fff;font:13px monospace;margin-top:8px;}
-  #picker {display:flex;gap:10px;margin-top:12px;flex-wrap:wrap;justify-content:center;}
-  .c {width:50px;height:50px;border-radius:50%;border:3px solid #555;cursor:pointer;transition:.15s;}
-  .c.sel {border-color:#FFD966;transform:scale(1.15);}
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{background:#000;height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:system-ui,sans-serif;}
+  #box{width:100vw;max-width:480px;aspect-ratio:3/4;max-height:70vh;position:relative;border-radius:12px;overflow:hidden;background:#111;}
+  video,canvas{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);}
+  #ui{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:5;border-radius:12px;background:rgba(0,0,0,0.85);gap:10px;padding:20px;}
+  #ui button{padding:16px 40px;font-size:17px;font-weight:700;border:none;border-radius:30px;background:#FFD966;color:#000;cursor:pointer;}
+  #log{position:absolute;top:8px;left:8px;z-index:15;color:#0f0;font:12px monospace;white-space:pre-line;background:rgba(0,0,0,0.75);padding:6px 10px;border-radius:6px;max-width:90%;}
+  #picker{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap;justify-content:center;}
+  .c{width:50px;height:50px;border-radius:50%;border:3px solid #555;cursor:pointer;transition:.15s;}
+  .c.sel{border-color:#FFD966;transform:scale(1.15);}
 </style>
 </head>
 <body>
 <div id="box">
   <video id="v" playsinline autoplay muted></video>
   <canvas id="c"></canvas>
-  <div id="overlay"><p style="font-size:16px;color:#FFD966;font-weight:700;">👒 Примерка кепок</p><p>Разреши камеру и примерь!</p><p style="font-size:11px;color:#aaa;">⚠️ Выбери <b style="color:#fff;">«Разрешить, когда я на сайте»</b><br>(первая кнопка), а не «в этот раз»</p><button id="btn">🎥 Включить камеру</button></div>
+  <div id="log"></div>
+  <div id="ui">
+    <p style="color:#FFD966;font-size:18px;font-weight:700;">👒 Примерка кепок</p>
+    <p style="color:#fff;font-size:14px;">Разреши камеру и примерь!</p>
+    <p style="color:#aaa;font-size:12px;">⚠️ Выбери <b style="color:#fff;">«Разрешить, когда я на сайте»</b></p>
+    <button id="btn">🎥 Включить камеру</button>
+  </div>
 </div>
 <div id="picker"></div>
-<div id="msg"></div>
 <script>
-const v=document.getElementById('v'), c=document.getElementById('c'), cx=c.getContext('2d');
-const btn=document.getElementById('btn'), overlay=document.getElementById('overlay'), msg=document.getElementById('msg');
+const v=document.getElementById('v'),c=document.getElementById('c'),cx=c.getContext('2d');
+const btn=document.getElementById('btn'),ui=document.getElementById('ui'),logEl=document.getElementById('log');
 let caps=['#1a1a1a','#c0392b','#2471a3','#d4b895','#1e8449','#7f8c8d'];
-let active=0, running=false, lm=null;
+let active=0, running=false, lm=null, stream=null;
+
+function log(s){logEl.textContent=(logEl.textContent||'')+s+'\n';console.log(s);}
 
 // Picker
 caps.forEach((clr,i)=>{
@@ -41,49 +47,74 @@ caps.forEach((clr,i)=>{
   document.getElementById('picker').appendChild(d);
 });
 
-function log(s){msg.textContent=s;console.log(s);}
-
-// Try camera automatically (for when permission was already granted)
-async function tryAuto() {
-  try {
-    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:640},height:{ideal:840}}});
-    await startWithStream(stream);
-    return true;
-  } catch(e) {
-    log('Нужно разрешение камеры');
-    return false;
+// Try auto when permission already granted
+(async function auto(){
+  log('🚀 Авто-старт...');
+  if(!navigator.mediaDevices){log('❌ Нет mediaDevices');return;}
+  try{
+    log('📷 getUserMedia...');
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:640},height:{ideal:840}}});
+    log('✅ Поток получен');
+    await startVideo();
+  }catch(e){
+    log('⏳ Жду нажатия кнопки ('+e.name+')');
+    btn.style.display='block';
   }
-}
+})();
 
-async function startWithStream(stream) {
-  v.srcObject=stream;
-  await v.play();
-  await new Promise(r=>{const ch=()=>{if(v.videoWidth>0)r();else requestAnimationFrame(ch);};ch();});
-  c.width=v.videoWidth; c.height=v.videoHeight;
-  overlay.style.display='none';
-  log('Камера работает!');
-  running=true;
-  // Load MediaPipe in background
-  import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/+esm').then(async m=>{
-    const vision=await m.FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm');
-    lm=await m.FaceLandmarker.createFromOptions(vision,{baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',delegate:'CPU'},runningMode:'VIDEO',numFaces:1,outputFaceBlendshapes:false,outputFacialTransformationMatrixes:false});
-    log('ИИ готов ✅');
-  });
-  requestAnimationFrame(loop);
-}
-
-btn.onclick=async ()=>{
-  btn.textContent='Жди...';
-  try {
-    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:640},height:{ideal:840}}});
-    await startWithStream(stream);
-  } catch(e) {
-    log('Ошибка: '+e.message);
-    btn.textContent='🎥 Включить камеру';
+btn.onclick=async function(){
+  btn.textContent='⏳ Жди...';btn.disabled=true;
+  log('📷 getUserMedia (по клику)...');
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:640},height:{ideal:840}}});
+    log('✅ Поток получен');
+    await startVideo();
+  }catch(e){
+    log('❌ Ошибка: '+e.name+' - '+e.message);
+    btn.textContent='🎥 Попробовать снова';btn.disabled=false;
   }
 };
 
-function loop() {
+async function startVideo(){
+  log('📹 srcObject...');
+  v.srcObject=stream;
+  log('▶️ play...');
+  try{await v.play();log('✅ play ок');}catch(e){log('play error: '+e.message);}
+
+  log('⏳ Жду размер видео...');
+  let tries=0;
+  await new Promise((resolve,reject)=>{
+    const check=()=>{
+      tries++;
+      if(v.videoWidth>0&&v.videoHeight>0){log('✅ Размер: '+v.videoWidth+'x'+v.videoHeight+' (попытка '+tries+')');resolve();}
+      else if(tries>100){reject(new Error('Таймаут размеров'));}
+      else requestAnimationFrame(check);
+    };
+    check();
+  });
+
+  c.width=v.videoWidth;c.height=v.videoHeight;
+  log('🎨 Canvas: '+c.width+'x'+c.height);
+  ui.style.display='none';
+  running=true;
+
+  // Load MediaPipe
+  log('🤖 Гружу ИИ...');
+  import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/+esm').then(async m=>{
+    log('📦 WASM...');
+    const vision=await m.FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm');
+    log('🧠 FaceLandmarker...');
+    lm=await m.FaceLandmarker.createFromOptions(vision,{
+      baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',delegate:'CPU'},
+      runningMode:'VIDEO',numFaces:1,outputFaceBlendshapes:false,outputFacialTransformationMatrixes:false
+    });
+    log('✅ ИИ готов!');
+  }).catch(e=>log('❌ ИИ ошибка: '+e.message));
+
+  requestAnimationFrame(loop);
+}
+
+function loop(){
   if(!running)return;
   requestAnimationFrame(loop);
   if(!v.videoWidth)return;
@@ -92,7 +123,7 @@ function loop() {
   if(lm){try{const r=lm.detectForVideo(v,performance.now());if(r.faceLandmarks?.length>0)drawCap(r.faceLandmarks[0]);}catch(e){}}
 }
 
-function drawCap(lm) {
+function drawCap(lm){
   const f=lm[10],lt=lm[234],rt=lm[454];
   if(!f||!lt||!rt)return;
   const w=c.width,h=c.height;
@@ -107,9 +138,6 @@ function drawCap(lm) {
   cx.fillStyle='#333';cx.beginPath();cx.arc(0,-hh*1.02,cw*.04,0,Math.PI*2);cx.fill();
   cx.restore();
 }
-
-// Auto-try on load
-tryAuto();
 </script>
 </body>
 </html>
