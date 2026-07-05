@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Примерка кепок 👒</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{background:#111;font-family:system-ui,sans-serif;min-height:100dvh;display:flex;flex-direction:column;align-items:center;color:#fff;user-select:none;-webkit-user-select:none;touch-action:none;}
+  h1{font-size:20px;margin:12px 0 6px;color:#FFD966;}
+  #canvas-box{position:relative;width:100vw;max-width:420px;aspect-ratio:3/4;max-height:60vh;background:#222;border-radius:12px;overflow:hidden;border:1px solid #333;}
+  canvas{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;z-index:1;}
+  video{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;z-index:2;display:none;}
+  #placeholder{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#888;gap:16px;z-index:3;}
+  #placeholder .icon{font-size:48px;}
+  #placeholder p{font-size:14px;}
+  #camera-ui{position:absolute;bottom:20px;left:0;right:0;display:none;justify-content:center;z-index:5;}
+  #capture-btn{width:64px;height:64px;border-radius:50%;border:4px solid #fff;background:rgba(255,255,255,0.3);cursor:pointer;box-shadow:0 0 0 4px rgba(0,0,0,0.3);}
+  #capture-btn:active{background:#fff;}
+  #close-cam{position:absolute;top:12px;right:12px;z-index:5;width:36px;height:36px;border-radius:50%;background:rgba(0,0,0,0.6);border:2px solid #fff;color:#fff;font-size:18px;cursor:pointer;display:none;}
+  #caps-row{display:flex;gap:8px;margin:12px 0;flex-wrap:wrap;justify-content:center;padding:0 12px;}
+  .cap-btn{width:48px;height:48px;border-radius:50%;border:3px solid #444;cursor:pointer;transition:.15s;background:#222;}
+  .cap-btn.sel{border-color:#FFD966;transform:scale(1.15);box-shadow:0 0 8px rgba(255,217,102,0.4);}
+  #actions{display:flex;gap:10px;margin:8px 0 16px;flex-wrap:wrap;justify-content:center;}
+  button{padding:12px 24px;font-size:14px;font-weight:700;border:none;border-radius:24px;cursor:pointer;touch-action:manipulation;}
+  .btn-yellow{background:#FFD966;color:#000;}
+  .btn-outline{background:transparent;color:#FFD966;border:2px solid #FFD966;}
+  .btn-green{background:#27ae60;color:#fff;}
+  .btn-red{background:#c0392b;color:#fff;}
+  #hint{color:#888;font-size:12px;text-align:center;margin:6px 0;min-height:18px;}
+  #debug{position:absolute;top:4px;left:4px;z-index:10;color:#0f0;font:11px monospace;background:rgba(0,0,0,0.8);padding:4px 8px;border-radius:4px;max-width:95%;white-space:pre-line;display:none;}
+</style>
+</head>
+<body>
+<h1>👒 Примерка кепок</h1>
+<div id="canvas-box">
+  <video id="v" playsinline autoplay muted></video>
+  <canvas id="c"></canvas>
+  <div id="debug"></div>
+  <div id="placeholder">
+    <div class="icon">📸</div>
+    <p>Загрузи фото или сделай снимок</p>
+  </div>
+  <div id="camera-ui"><button id="capture-btn"></button></div>
+  <button id="close-cam">✕</button>
+</div>
+<div id="hint"></div>
+<div id="caps-row"></div>
+<div id="actions">
+  <input type="file" id="fileInput" accept="image/*" style="display:none">
+  <button class="btn-yellow" id="uploadBtn">📁 Загрузить фото</button>
+  <button class="btn-outline" id="cameraBtn">📷 Сделать снимок</button>
+  <button class="btn-green" id="downloadBtn" style="display:none">💾 Скачать</button>
+  <button class="btn-red" id="retakeBtn" style="display:none">📷 Переснять</button>
+</div>
+
+<script>
+const caps=[
+  {name:'Чёрная',top:'#1a1a1a',brim:'#111',band:'#2a2a2a'},
+  {name:'Красная',top:'#b71c1c',brim:'#7f0000',band:'#c62828'},
+  {name:'Синяя',top:'#0d47a1',brim:'#002171',band:'#1565c0'},
+  {name:'Бежевая',top:'#c9a87c',brim:'#a0845c',band:'#d4b896'},
+  {name:'Зелёная',top:'#1b5e20',brim:'#003300',band:'#2e7d32'},
+  {name:'Серая',top:'#546e7a',brim:'#37474f',band:'#607d8b'},
+];
+let activeCap=0, photoImg=null;
+let capX=0, capY=0, capScale=1, capAngle=0;
+
+const box=document.getElementById('canvas-box'),cv=document.getElementById('c'),cx=cv.getContext('2d');
+const v=document.getElementById('v'),placeholder=document.getElementById('placeholder'),hint=document.getElementById('hint');
+const fileInput=document.getElementById('fileInput');
+const cameraUI=document.getElementById('camera-ui'),closeCam=document.getElementById('close-cam');
+const dbg=document.getElementById('debug');
+
+function log(s){dbg.textContent=(dbg.textContent||'')+'\n'+s;dbg.style.display='block';console.log(s);}
+function clearLog(){dbg.textContent='';dbg.style.display='none';}
+
+let camStream=null;
+
+// Cap selector
+caps.forEach((cap,i)=>{
+  const d=document.createElement('div');
+  d.className='cap-btn'+(i===0?' sel':'');
+  const mc=document.createElement('canvas');mc.width=48;mc.height=48;
+  const mx=mc.getContext('2d');
+  mx.fillStyle=cap.top;mx.beginPath();mx.ellipse(24,18,20,12,0,Math.PI,0);mx.fill();
+  mx.fillStyle=cap.band;mx.fillRect(4,16,40,4);
+  mx.fillStyle=cap.brim;mx.beginPath();mx.ellipse(24,30,22,8,0,Math.PI*0.7,Math.PI*0.3);mx.fill();
+  d.appendChild(mc);
+  d.onclick=()=>{document.querySelectorAll('.cap-btn').forEach(b=>b.classList.remove('sel'));d.classList.add('sel');activeCap=i;redraw();};
+  document.getElementById('caps-row').appendChild(d);
+});
+
+// Upload
+document.getElementById('uploadBtn').onclick=()=>fileInput.click();
+fileInput.onchange=e=>{
+  const f=e.target.files[0];
+  if(!f)return;
+  const reader=new FileReader();
+  reader.onload=ev=>{loadPhoto(ev.target.result);};
+  reader.readAsDataURL(f);
+};
+
+// Camera button
+document.getElementById('cameraBtn').onclick=()=>{
+  log('cameraBtn clicked');
+  openCamera();
+};
+
+closeCam.onclick=()=>{
+  log('close camera');
+  closeCameraFn();
+};
+
+document.getElementById('capture-btn').onclick=()=>{
+  log('capture!');
+  capturePhoto();
+};
+
+document.getElementById('retakeBtn').onclick=()=>{
+  log('retake');
+  openCamera();
+};
+
+async function openCamera(){
+  log('openCamera start');
+  if(!navigator.mediaDevices){log('NO mediaDevices!');hint.textContent='❌ Браузер не поддерживает камеру';return;}
+  if(!navigator.mediaDevices.getUserMedia){log('NO getUserMedia!');hint.textContent='❌ Нет доступа к камере';return;}
+
+  try{
+    log('calling getUserMedia...');
+    camStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user'}});
+    log('stream tracks: '+camStream.getTracks().length);
+
+    v.srcObject=camStream;
+    v.style.display='block';
+    cv.style.display='none';
+    placeholder.style.display='none';
+    cameraUI.style.display='flex';
+    closeCam.style.display='block';
+    clearLog();
+
+    log('calling play...');
+    await v.play();
+    log('play success! readyState='+v.readyState);
+    hint.textContent='📸 Наведи и нажми белую кнопку';
+  }catch(e){
+    log('ERROR: '+e.name+' - '+e.message);
+    hint.textContent='❌ '+e.message;
+  }
+}
+
+function closeCameraFn(){
+  log('closing camera');
+  if(camStream){camStream.getTracks().forEach(t=>{t.stop();log('stopped track');});camStream=null;}
+  v.style.display='none';
+  cameraUI.style.display='none';
+  closeCam.style.display='none';
+  clearLog();
+  if(photoImg){cv.style.display='block';hint.textContent='👆 Двигай кепку';}
+  else{placeholder.style.display='flex';cv.style.display='block';hint.textContent='';}
+}
+
+function capturePhoto(){
+  cv.width=v.videoWidth;
+  cv.height=v.videoHeight;
+  log('capture: '+cv.width+'x'+cv.height);
+  cx.save();
+  cx.setTransform(-1,0,0,1,cv.width,0);
+  cx.drawImage(v,0,0,cv.width,cv.height);
+  cx.setTransform(1,0,0,1,0,0);
+  cx.restore();
+  const data=cv.toDataURL('image/jpeg',0.9);
+  closeCameraFn();
+  loadPhoto(data);
+}
+
+function loadPhoto(src){
+  const img=new Image();
+  img.onload=()=>{
+    photoImg=img;
+    placeholder.style.display='none';
+    cv.style.display='block';
+    capX=0;capY=0;capScale=1;capAngle=0;
+    document.getElementById('downloadBtn').style.display='inline-block';
+    document.getElementById('retakeBtn').style.display='inline-block';
+    hint.textContent='👆 Двигай кепку. Двумя пальцами — размер и поворот';
+    resizeCanvas();
+    redraw();
+  };
+  img.src=src;
+}
+
+function resizeCanvas(){
+  if(!photoImg)return;
+  const boxW=box.clientWidth, boxH=box.clientHeight;
+  const ratio=Math.min(boxW/photoImg.width, boxH/photoImg.height);
+  cv.width=photoImg.width*ratio;
+  cv.height=photoImg.height*ratio;
+}
+
+window.addEventListener('resize',()=>{resizeCanvas();redraw();});
+
+// Touch
+let capStart=null;
+box.addEventListener('touchstart',e=>{
+  if(!photoImg||v.style.display==='block')return;
+  e.preventDefault();
+  const t=e.touches;
+  if(t.length===1)capStart={x:capX,y:capY,cx:t[0].clientX,cy:t[0].clientY};
+  else if(t.length===2)capStart={x:capX,y:capY,scale:capScale,angle:capAngle,d:Math.hypot(t[1].clientX-t[0].clientX,t[1].clientY-t[0].clientY),a:Math.atan2(t[1].clientY-t[0].clientY,t[1].clientX-t[0].clientX)};
+},{passive:false});
+
+box.addEventListener('touchmove',e=>{
+  if(!photoImg||!capStart)return;
+  e.preventDefault();
+  const t=e.touches;
+  if(t.length===1&&capStart.cx!==undefined){capX=capStart.x+(t[0].clientX-capStart.cx)*photoImg.width/cv.width;capY=capStart.y+(t[0].clientY-capStart.cy)*photoImg.height/cv.height;}
+  else if(t.length===2&&capStart.d!==undefined){const d=Math.hypot(t[1].clientX-t[0].clientX,t[1].clientY-t[0].clientY),a=Math.atan2(t[1].clientY-t[0].clientY,t[1].clientX-t[0].clientX);capScale=Math.max(0.3,Math.min(3,capStart.scale*d/capStart.d));capAngle=capStart.angle+(a-capStart.a)*180/Math.PI;}
+  redraw();
+},{passive:false});
+
+box.addEventListener('touchend',()=>{capStart=null;});
+
+// Redraw
+function redraw(){
+  if(!photoImg)return;
+  cx.clearRect(0,0,cv.width,cv.height);
+  cx.drawImage(photoImg,0,0,cv.width,cv.height);
+  const scale=cv.width/photoImg.width;
+  const capW=photoImg.width*0.5*capScale, capH=photoImg.width*0.3*capScale;
+  const cx0=cv.width/2+capX*scale, cy0=cv.height*0.1+capY*scale;
+  cx.save();cx.translate(cx0,cy0);cx.rotate(capAngle*Math.PI/180);
+  const hw=capW/2, hh=capH;
+  const cap=caps[activeCap];
+  cx.fillStyle='rgba(0,0,0,0.2)';cx.beginPath();cx.ellipse(0,hh*0.3,hw*0.9,hh*0.15,0,0,Math.PI*2);cx.fill();
+  cx.fillStyle=cap.top;cx.beginPath();cx.moveTo(-hw,0);cx.quadraticCurveTo(-hw,-hh*.85,-hw*.1,-hh*.92);cx.quadraticCurveTo(0,-hh*1.08,hw*.1,-hh*.92);cx.quadraticCurveTo(hw,-hh*.85,hw,0);cx.closePath();cx.fill();
+  cx.fillStyle='rgba(255,255,255,0.08)';cx.beginPath();cx.moveTo(-hw*.3,0);cx.quadraticCurveTo(-hw*.3,-hh*.7,-hw*.05,-hh*.85);cx.quadraticCurveTo(0,-hh*.9,0,0);cx.closePath();cx.fill();
+  cx.fillStyle=cap.band;cx.fillRect(-hw-1,-hh*.15,capW+2,hh*.15);
+  cx.strokeStyle='rgba(255,255,255,0.15)';cx.lineWidth=1;cx.beginPath();cx.moveTo(-hw,-hh*.075);cx.lineTo(hw,-hh*.075);cx.stroke();
+  cx.fillStyle=cap.brim;cx.beginPath();cx.moveTo(-hw-capW*.06,0);cx.quadraticCurveTo(-hw*.4,hh*.28,0,hh*.38);cx.quadraticCurveTo(hw*.4,hh*.28,hw+capW*.06,0);cx.quadraticCurveTo(0,hh*.1,-hw-capW*.06,0);cx.fill();
+  cx.fillStyle='rgba(255,255,255,0.05)';cx.beginPath();cx.moveTo(-hw*.4,0);cx.quadraticCurveTo(-hw*.2,hh*.2,0,hh*.25);cx.quadraticCurveTo(hw*.2,hh*.2,hw*.4,0);cx.quadraticCurveTo(0,hh*.05,-hw*.4,0);cx.fill();
+  cx.fillStyle='#111';cx.beginPath();cx.arc(0,-hh*1.04,capW*0.03,0,Math.PI*2);cx.fill();
+  cx.restore();
+}
+
+document.getElementById('downloadBtn').onclick=()=>{
+  const a=document.createElement('a');
+  a.download='primierka-kepki.png';a.href=cv.toDataURL('image/png');a.click();
+};
+</script>
+</body>
+</html>
