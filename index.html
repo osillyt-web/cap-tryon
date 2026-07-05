@@ -6,138 +6,214 @@
 <title>Примерка кепок 👒</title>
 <style>
   *{margin:0;padding:0;box-sizing:border-box;}
-  body{background:#000;height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:system-ui,sans-serif;}
-  #box{width:100vw;max-width:480px;aspect-ratio:3/4;max-height:70vh;position:relative;border-radius:12px;overflow:hidden;background:#111;}
-  canvas{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;}
-  #ui{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:5;border-radius:12px;background:rgba(0,0,0,0.85);gap:10px;padding:20px;}
-  #ui button{padding:16px 40px;font-size:17px;font-weight:700;border:none;border-radius:30px;background:#FFD966;color:#000;cursor:pointer;}
-  #log{position:absolute;top:8px;left:8px;z-index:15;color:#0f0;font:12px monospace;white-space:pre-line;background:rgba(0,0,0,0.75);padding:6px 10px;border-radius:6px;max-width:90%;}
-  #picker{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap;justify-content:center;}
-  .c{width:50px;height:50px;border-radius:50%;border:3px solid #555;cursor:pointer;transition:.15s;}
-  .c.sel{border-color:#FFD966;transform:scale(1.15);}
+  body{background:#111;font-family:system-ui,sans-serif;min-height:100dvh;display:flex;flex-direction:column;align-items:center;color:#fff;user-select:none;-webkit-user-select:none;touch-action:none;}
+  h1{font-size:20px;margin:12px 0 6px;color:#FFD966;}
+  #canvas-box{position:relative;width:100vw;max-width:420px;aspect-ratio:3/4;max-height:60vh;background:#222;border-radius:12px;overflow:hidden;border:1px solid #333;}
+  canvas{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;}
+  #placeholder{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#888;gap:16px;}
+  #placeholder .icon{font-size:48px;}
+  #placeholder p{font-size:14px;}
+  #caps-row{display:flex;gap:8px;margin:12px 0;flex-wrap:wrap;justify-content:center;padding:0 12px;}
+  .cap-btn{width:48px;height:48px;border-radius:50%;border:3px solid #444;cursor:pointer;transition:.15s;background:#222;}
+  .cap-btn.sel{border-color:#FFD966;transform:scale(1.15);box-shadow:0 0 8px rgba(255,217,102,0.4);}
+  #actions{display:flex;gap:10px;margin:8px 0 16px;flex-wrap:wrap;justify-content:center;}
+  button{padding:12px 24px;font-size:14px;font-weight:700;border:none;border-radius:24px;cursor:pointer;touch-action:manipulation;}
+  .btn-yellow{background:#FFD966;color:#000;}
+  .btn-outline{background:transparent;color:#FFD966;border:2px solid #FFD966;}
+  .btn-green{background:#27ae60;color:#fff;}
+  #hint{color:#888;font-size:12px;text-align:center;margin-bottom:8px;min-height:18px;}
 </style>
 </head>
 <body>
-<div id="box">
+<h1>👒 Примерка кепок</h1>
+<div id="canvas-box">
   <canvas id="c"></canvas>
-  <div id="log"></div>
-  <div id="ui">
-    <p style="color:#FFD966;font-size:18px;font-weight:700;">👒 Примерка кепок</p>
-    <p style="color:#fff;font-size:14px;">Разреши камеру и примерь!</p>
-    <p style="color:#aaa;font-size:12px;">⚠️ Выбери <b style="color:#fff;">«Разрешить, когда я на сайте»</b></p>
-    <button id="btn">🎥 Включить камеру</button>
+  <div id="placeholder">
+    <div class="icon">📸</div>
+    <p>Загрузи фото или сделай снимок</p>
   </div>
 </div>
-<div id="picker"></div>
+<div id="hint"></div>
+<div id="caps-row"></div>
+<div id="actions">
+  <input type="file" id="fileInput" accept="image/*" capture="user" style="display:none">
+  <button class="btn-yellow" id="uploadBtn">📁 Загрузить фото</button>
+  <button class="btn-outline" id="cameraBtn">📷 Сделать снимок</button>
+  <button class="btn-green" id="downloadBtn" style="display:none">💾 Скачать</button>
+</div>
+
 <script>
-const c=document.getElementById('c'),cx=c.getContext('2d');
-const btn=document.getElementById('btn'),ui=document.getElementById('ui'),logEl=document.getElementById('log');
-let caps=['#1a1a1a','#c0392b','#2471a3','#d4b895','#1e8449','#7f8c8d'];
-let active=0, running=false, lm=null, stream=null, video=null, frameN=0;
+const caps=[
+  {name:'Чёрная',top:'#1a1a1a',brim:'#111',band:'#2a2a2a'},
+  {name:'Красная',top:'#b71c1c',brim:'#7f0000',band:'#c62828'},
+  {name:'Синяя',top:'#0d47a1',brim:'#002171',band:'#1565c0'},
+  {name:'Бежевая',top:'#c9a87c',brim:'#a0845c',band:'#d4b896'},
+  {name:'Зелёная',top:'#1b5e20',brim:'#003300',band:'#2e7d32'},
+  {name:'Серая',top:'#546e7a',brim:'#37474f',band:'#607d8b'},
+];
+let activeCap=0, photoImg=null;
+let capX=0, capY=0, capScale=1, capAngle=0;
 
-function log(s){logEl.textContent=(logEl.textContent||'')+s+'\n';console.log(s);}
+const box=document.getElementById('canvas-box'),cv=document.getElementById('c'),cx=cv.getContext('2d');
+const placeholder=document.getElementById('placeholder'),hint=document.getElementById('hint');
+const fileInput=document.getElementById('fileInput');
 
-caps.forEach((clr,i)=>{
+// Build cap selector
+const capsRow=document.getElementById('caps-row');
+caps.forEach((cap,i)=>{
   const d=document.createElement('div');
-  d.className='c'+(i===0?' sel':'');
-  d.style.background=clr;
-  d.onclick=()=>{document.querySelectorAll('.c').forEach(e=>e.classList.remove('sel'));d.classList.add('sel');active=i;};
-  document.getElementById('picker').appendChild(d);
+  d.className='cap-btn'+(i===0?' sel':'');
+  // Draw mini cap
+  const mc=document.createElement('canvas');mc.width=48;mc.height=48;
+  const mx=mc.getContext('2d');
+  mx.fillStyle=cap.top;mx.beginPath();mx.ellipse(24,18,20,12,0,Math.PI,0);mx.fill();
+  mx.fillStyle=cap.band;mx.fillRect(4,16,40,4);
+  mx.fillStyle=cap.brim;mx.beginPath();mx.ellipse(24,30,22,8,0,Math.PI*0.7,Math.PI*0.3);mx.fill();
+  d.appendChild(mc);
+  d.onclick=()=>{document.querySelectorAll('.cap-btn').forEach(b=>b.classList.remove('sel'));d.classList.add('sel');activeCap=i;redraw();};
+  capsRow.appendChild(d);
 });
 
-// Auto-start
-(async function auto(){
-  log('🚀 Авто-старт...');
-  if(!navigator.mediaDevices){log('❌ Нет mediaDevices');return;}
-  try{
-    log('📷 getUserMedia...');
-    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:640},height:{ideal:840}}});
-    log('✅ Поток получен');
-    await startVideo();
-  }catch(e){
-    log('⏳ Жду нажатия кнопки ('+e.name+')');
-  }
-})();
-
-btn.onclick=async function(){
-  btn.textContent='⏳ Жди...';btn.disabled=true;
-  log('📷 getUserMedia (по клику)...');
-  try{
-    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:640},height:{ideal:840}}});
-    log('✅ Поток получен');
-    await startVideo();
-  }catch(e){
-    log('❌ Ошибка: '+e.name);
-    btn.textContent='🎥 Попробовать снова';btn.disabled=false;
-  }
+// Upload
+document.getElementById('uploadBtn').onclick=()=>fileInput.click();
+fileInput.onchange=e=>{
+  const f=e.target.files[0];
+  if(!f)return;
+  const reader=new FileReader();
+  reader.onload=ev=>{loadPhoto(ev.target.result);};
+  reader.readAsDataURL(f);
 };
 
-async function startVideo(){
-  // Create video element dynamically
-  video=document.createElement('video');
-  video.setAttribute('playsinline','');
-  video.setAttribute('autoplay','');
-  video.setAttribute('muted','');
-  video.srcObject=stream;
-  log('▶️ play...');
-  try{await video.play();log('✅ play ок');}catch(e){log('play error: '+e.message);}
+// Camera
+document.getElementById('cameraBtn').onclick=()=>{
+  fileInput.setAttribute('capture','user');
+  fileInput.click();
+  fileInput.setAttribute('capture','');
+};
 
-  log('⏳ Жду размер...');
-  await new Promise(resolve=>{
-    const check=()=>{if(video.videoWidth>0)resolve();else requestAnimationFrame(check);};
-    check();
-  });
-  log('✅ Размер: '+video.videoWidth+'x'+video.videoHeight);
-  c.width=video.videoWidth; c.height=video.videoHeight;
-  ui.style.display='none';
-  running=true;
-
-  // Load MediaPipe
-  log('🤖 Гружу ИИ...');
-  import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/+esm').then(async m=>{
-    const vision=await m.FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm');
-    lm=await m.FaceLandmarker.createFromOptions(vision,{
-      baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',delegate:'CPU'},
-      runningMode:'VIDEO',numFaces:1,outputFaceBlendshapes:false,outputFacialTransformationMatrixes:false
-    });
-    log('✅ ИИ готов!');
-  }).catch(e=>log('❌ ИИ ошибка: '+e.message));
-
-  // Use requestVideoFrameCallback for live video sync
-  function onFrame(now, metadata) {
-    if(!running)return;
-    video.requestVideoFrameCallback(onFrame);
-    frameN++;
-    // Draw mirrored video
-    cx.save();
-    cx.setTransform(-1,0,0,1,c.width,0);
-    cx.drawImage(video,0,0,c.width,c.height);
-    cx.setTransform(1,0,0,1,0,0);
-    // Detect & draw cap
-    if(lm){try{const r=lm.detectForVideo(video,performance.now());if(r.faceLandmarks?.length>0)drawCap(r.faceLandmarks[0]);}catch(e){}}
-    cx.restore();
-  }
-  video.requestVideoFrameCallback(onFrame);
-  log('📹 Живое видео запущено');
+function loadPhoto(src){
+  const img=new Image();
+  img.onload=()=>{
+    photoImg=img;
+    placeholder.style.display='none';
+    // Reset cap position
+    capX=0;capY=0;capScale=1;capAngle=0;
+    document.getElementById('downloadBtn').style.display='inline-block';
+    hint.textContent='👆 Двигай кепку. Двумя пальцами — размер и поворот';
+    resizeCanvas();
+    redraw();
+  };
+  img.src=src;
 }
 
-function drawCap(lm){
-  const f=lm[10],lt=lm[234],rt=lm[454],le=lm[33],re=lm[263];
-  if(!f||!lt||!rt||!le||!re)return;
-  const headW=Math.hypot(rt.x*c.width-lt.x*c.width, rt.y*c.height-lt.y*c.height);
-  const eyeDist=Math.hypot(re.x*c.width-le.x*c.width, re.y*c.height-le.y*c.height);
-  const cw=headW*1.3, ch=headW*0.6;
-  const cx0=(lt.x*c.width+rt.x*c.width)/2;
-  const cy0=f.y*c.height - eyeDist*1.2;
-  const ang=Math.atan2(rt.y*c.height-lt.y*c.height, rt.x*c.width-lt.x*c.width);
-  cx.save();cx.translate(cx0,cy0);cx.rotate(ang);
-  const hw=cw/2, hh=ch;
-  cx.fillStyle=caps[active];cx.beginPath();cx.moveTo(-hw,0);cx.quadraticCurveTo(-hw,-hh*.85,-hw*.15,-hh*.9);cx.quadraticCurveTo(0,-hh*1.05,hw*.15,-hh*.9);cx.quadraticCurveTo(hw,-hh*.85,hw,0);cx.closePath();cx.fill();
-  cx.fillStyle='rgba(255,255,255,0.25)';cx.fillRect(-hw-1,-hh*.16,cw+2,hh*.16);
-  cx.fillStyle='#111';cx.beginPath();cx.moveTo(-hw-cw*.06,0);cx.quadraticCurveTo(-hw*.4,hh*.3,0,hh*.4);cx.quadraticCurveTo(hw*.4,hh*.3,hw+cw*.06,0);cx.quadraticCurveTo(0,hh*.1,-hw-cw*.06,0);cx.fill();
-  cx.fillStyle='#333';cx.beginPath();cx.arc(0,-hh*1.02,cw*.035,0,Math.PI*2);cx.fill();
+function resizeCanvas(){
+  if(!photoImg)return;
+  const boxW=box.clientWidth, boxH=box.clientHeight;
+  const ratio=Math.min(boxW/photoImg.width, boxH/photoImg.height);
+  cv.width=photoImg.width*ratio;
+  cv.height=photoImg.height*ratio;
+}
+
+window.addEventListener('resize',()=>{resizeCanvas();redraw();});
+
+// ── Touch gestures ──────────────────────────
+let touches0=null, capStart=null;
+
+box.addEventListener('touchstart',e=>{
+  if(!photoImg){return;}
+  e.preventDefault();
+  const t=e.touches;
+  if(t.length===1){
+    touches0=null; // start drag
+    capStart={x:capX, y:capY, cx:t[0].clientX, cy:t[0].clientY};
+  }else if(t.length===2){
+    capStart={x:capX, y:capY, scale:capScale, angle:capAngle,
+      d:Math.hypot(t[1].clientX-t[0].clientX, t[1].clientY-t[0].clientY),
+      a:Math.atan2(t[1].clientY-t[0].clientY, t[1].clientX-t[0].clientX)};
+    touches0=null;
+  }
+},{passive:false});
+
+box.addEventListener('touchmove',e=>{
+  if(!photoImg||!capStart)return;
+  e.preventDefault();
+  const t=e.touches;
+  if(t.length===1&&capStart.cx!==undefined){
+    capX=capStart.x+(t[0].clientX-capStart.cx)*photoImg.width/cv.width;
+    capY=capStart.y+(t[0].clientY-capStart.cy)*photoImg.height/cv.height;
+  }else if(t.length===2&&capStart.d!==undefined){
+    const d=Math.hypot(t[1].clientX-t[0].clientX, t[1].clientY-t[0].clientY);
+    const a=Math.atan2(t[1].clientY-t[0].clientY, t[1].clientX-t[0].clientX);
+    capScale=Math.max(0.3,Math.min(3, capStart.scale*d/capStart.d));
+    capAngle=capStart.angle+(a-capStart.a)*180/Math.PI;
+  }
+  redraw();
+},{passive:false});
+
+box.addEventListener('touchend',()=>{capStart=null;});
+
+// ── Redraw ────────────────────────────────────
+function redraw(){
+  if(!photoImg)return;
+  cx.clearRect(0,0,cv.width,cv.height);
+  // Photo
+  cx.drawImage(photoImg,0,0,cv.width,cv.height);
+
+  // Cap position in canvas coords
+  const imgW=photoImg.width, imgH=photoImg.height;
+  const scale=cv.width/imgW; // canvas-to-image scale
+  const capW=imgW*0.5*capScale, capH=imgW*0.3*capScale;
+  const cx0=cv.width/2+capX*scale;
+  const cy0=cv.height*0.1+capY*scale;
+
+  cx.save();
+  cx.translate(cx0,cy0);
+  cx.rotate(capAngle*Math.PI/180);
+  const hw=capW/2, hh=capH;
+  const cap=caps[activeCap];
+
+  // Shadow
+  cx.fillStyle='rgba(0,0,0,0.2)';
+  cx.beginPath();cx.ellipse(0,hh*0.3,hw*0.9,hh*0.15,0,0,Math.PI*2);cx.fill();
+
+  // Dome
+  cx.fillStyle=cap.top;
+  cx.beginPath();cx.moveTo(-hw,0);cx.quadraticCurveTo(-hw,-hh*.85,-hw*.1,-hh*.92);cx.quadraticCurveTo(0,-hh*1.08,hw*.1,-hh*.92);cx.quadraticCurveTo(hw,-hh*.85,hw,0);cx.closePath();cx.fill();
+  // Highlight
+  cx.fillStyle='rgba(255,255,255,0.08)';
+  cx.beginPath();cx.moveTo(-hw*.3,0);cx.quadraticCurveTo(-hw*.3,-hh*.7,-hw*.05,-hh*.85);cx.quadraticCurveTo(0,-hh*.9,0,0);cx.closePath();cx.fill();
+
+  // Band
+  const bandH=hh*0.15;
+  cx.fillStyle=cap.band;
+  cx.fillRect(-hw-1,-bandH,capW+2,bandH);
+  // Band stitch
+  cx.strokeStyle='rgba(255,255,255,0.15)';
+  cx.lineWidth=1;
+  cx.beginPath();cx.moveTo(-hw,-bandH*0.5);cx.lineTo(hw,-bandH*0.5);cx.stroke();
+
+  // Brim
+  cx.fillStyle=cap.brim;
+  cx.beginPath();cx.moveTo(-hw-capW*0.06,0);cx.quadraticCurveTo(-hw*.4,hh*.28,0,hh*.38);cx.quadraticCurveTo(hw*.4,hh*.28,hw+capW*0.06,0);cx.quadraticCurveTo(0,hh*.1,-hw-capW*0.06,0);cx.fill();
+  // Brim highlight
+  cx.fillStyle='rgba(255,255,255,0.05)';
+  cx.beginPath();cx.moveTo(-hw*.4,0);cx.quadraticCurveTo(-hw*.2,hh*.2,0,hh*.25);cx.quadraticCurveTo(hw*.2,hh*.2,hw*.4,0);cx.quadraticCurveTo(0,hh*.05,-hw*.4,0);cx.fill();
+
+  // Top button
+  cx.fillStyle='#111';
+  cx.beginPath();cx.arc(0,-hh*1.04,capW*0.03,0,Math.PI*2);cx.fill();
+
   cx.restore();
 }
+
+// ── Download ──────────────────────────────────
+document.getElementById('downloadBtn').onclick=()=>{
+  const link=document.createElement('a');
+  link.download='primierka-kepki.png';
+  link.href=cv.toDataURL('image/png');
+  link.click();
+};
+
 </script>
 </body>
 </html>
