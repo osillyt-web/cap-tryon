@@ -9,15 +9,15 @@
   body{background:#111;font-family:system-ui,sans-serif;min-height:100dvh;display:flex;flex-direction:column;align-items:center;color:#fff;user-select:none;-webkit-user-select:none;touch-action:none;}
   h1{font-size:20px;margin:12px 0 6px;color:#FFD966;}
   #canvas-box{position:relative;width:100vw;max-width:420px;aspect-ratio:3/4;max-height:60vh;background:#222;border-radius:12px;overflow:hidden;border:1px solid #333;}
-  canvas{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;}
-  video{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);}
-  #placeholder{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#888;gap:16px;z-index:2;}
+  canvas{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;z-index:1;}
+  video{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;z-index:2;display:none;}
+  #placeholder{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#888;gap:16px;z-index:3;}
   #placeholder .icon{font-size:48px;}
   #placeholder p{font-size:14px;}
-  #camera-ui{position:absolute;bottom:20px;left:0;right:0;display:none;justify-content:center;z-index:3;}
+  #camera-ui{position:absolute;bottom:20px;left:0;right:0;display:none;justify-content:center;z-index:5;}
   #capture-btn{width:64px;height:64px;border-radius:50%;border:4px solid #fff;background:rgba(255,255,255,0.3);cursor:pointer;box-shadow:0 0 0 4px rgba(0,0,0,0.3);}
   #capture-btn:active{background:#fff;}
-  #close-cam{position:absolute;top:12px;right:12px;z-index:3;width:36px;height:36px;border-radius:50%;background:rgba(0,0,0,0.6);border:2px solid #fff;color:#fff;font-size:18px;cursor:pointer;display:none;}
+  #close-cam{position:absolute;top:12px;right:12px;z-index:5;width:36px;height:36px;border-radius:50%;background:rgba(0,0,0,0.6);border:2px solid #fff;color:#fff;font-size:18px;cursor:pointer;display:none;}
   #caps-row{display:flex;gap:8px;margin:12px 0;flex-wrap:wrap;justify-content:center;padding:0 12px;}
   .cap-btn{width:48px;height:48px;border-radius:50%;border:3px solid #444;cursor:pointer;transition:.15s;background:#222;}
   .cap-btn.sel{border-color:#FFD966;transform:scale(1.15);box-shadow:0 0 8px rgba(255,217,102,0.4);}
@@ -27,14 +27,16 @@
   .btn-outline{background:transparent;color:#FFD966;border:2px solid #FFD966;}
   .btn-green{background:#27ae60;color:#fff;}
   .btn-red{background:#c0392b;color:#fff;}
-  #hint{color:#888;font-size:12px;text-align:center;margin-bottom:8px;min-height:18px;}
+  #hint{color:#888;font-size:12px;text-align:center;margin:6px 0;min-height:18px;}
+  #debug{position:absolute;top:4px;left:4px;z-index:10;color:#0f0;font:11px monospace;background:rgba(0,0,0,0.8);padding:4px 8px;border-radius:4px;max-width:95%;white-space:pre-line;display:none;}
 </style>
 </head>
 <body>
 <h1>👒 Примерка кепок</h1>
 <div id="canvas-box">
+  <video id="v" playsinline autoplay muted></video>
   <canvas id="c"></canvas>
-  <video id="v" playsinline autoplay muted style="display:none"></video>
+  <div id="debug"></div>
   <div id="placeholder">
     <div class="icon">📸</div>
     <p>Загрузи фото или сделай снимок</p>
@@ -68,11 +70,14 @@ const box=document.getElementById('canvas-box'),cv=document.getElementById('c'),
 const v=document.getElementById('v'),placeholder=document.getElementById('placeholder'),hint=document.getElementById('hint');
 const fileInput=document.getElementById('fileInput');
 const cameraUI=document.getElementById('camera-ui'),closeCam=document.getElementById('close-cam');
+const dbg=document.getElementById('debug');
+
+function log(s){dbg.textContent=(dbg.textContent||'')+'\n'+s;dbg.style.display='block';console.log(s);}
+function clearLog(){dbg.textContent='';dbg.style.display='none';}
 
 let camStream=null;
 
-// Build cap selector
-const capsRow=document.getElementById('caps-row');
+// Cap selector
 caps.forEach((cap,i)=>{
   const d=document.createElement('div');
   d.className='cap-btn'+(i===0?' sel':'');
@@ -83,7 +88,7 @@ caps.forEach((cap,i)=>{
   mx.fillStyle=cap.brim;mx.beginPath();mx.ellipse(24,30,22,8,0,Math.PI*0.7,Math.PI*0.3);mx.fill();
   d.appendChild(mc);
   d.onclick=()=>{document.querySelectorAll('.cap-btn').forEach(b=>b.classList.remove('sel'));d.classList.add('sel');activeCap=i;redraw();};
-  capsRow.appendChild(d);
+  document.getElementById('caps-row').appendChild(d);
 });
 
 // Upload
@@ -96,51 +101,77 @@ fileInput.onchange=e=>{
   reader.readAsDataURL(f);
 };
 
-// Camera
-document.getElementById('cameraBtn').onclick=openCamera;
-closeCam.onclick=closeCameraFn;
-document.getElementById('capture-btn').onclick=capturePhoto;
-document.getElementById('retakeBtn').onclick=openCamera;
+// Camera button
+document.getElementById('cameraBtn').onclick=()=>{
+  log('cameraBtn clicked');
+  openCamera();
+};
+
+closeCam.onclick=()=>{
+  log('close camera');
+  closeCameraFn();
+};
+
+document.getElementById('capture-btn').onclick=()=>{
+  log('capture!');
+  capturePhoto();
+};
+
+document.getElementById('retakeBtn').onclick=()=>{
+  log('retake');
+  openCamera();
+};
 
 async function openCamera(){
+  log('openCamera start');
+  if(!navigator.mediaDevices){log('NO mediaDevices!');hint.textContent='❌ Браузер не поддерживает камеру';return;}
+  if(!navigator.mediaDevices.getUserMedia){log('NO getUserMedia!');hint.textContent='❌ Нет доступа к камере';return;}
+
   try{
-    camStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:{ideal:1280},height:{ideal:1600}}});
+    log('calling getUserMedia...');
+    camStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user'}});
+    log('stream tracks: '+camStream.getTracks().length);
+
     v.srcObject=camStream;
     v.style.display='block';
-    await v.play();
+    cv.style.display='none';
+    placeholder.style.display='none';
     cameraUI.style.display='flex';
     closeCam.style.display='block';
-    placeholder.style.display='none';
-    cv.style.display='none';
-    hint.textContent='📸 Наведи камеру и нажми кнопку';
+    clearLog();
+
+    log('calling play...');
+    await v.play();
+    log('play success! readyState='+v.readyState);
+    hint.textContent='📸 Наведи и нажми белую кнопку';
   }catch(e){
-    hint.textContent='❌ Не удалось открыть камеру: '+e.message;
+    log('ERROR: '+e.name+' - '+e.message);
+    hint.textContent='❌ '+e.message;
   }
 }
 
 function closeCameraFn(){
-  if(camStream){camStream.getTracks().forEach(t=>t.stop());camStream=null;}
+  log('closing camera');
+  if(camStream){camStream.getTracks().forEach(t=>{t.stop();log('stopped track');});camStream=null;}
   v.style.display='none';
   cameraUI.style.display='none';
   closeCam.style.display='none';
-  if(!photoImg){placeholder.style.display='flex';cv.style.display='block';}
-  hint.textContent=photoImg?'👆 Двигай кепку':'';
+  clearLog();
+  if(photoImg){cv.style.display='block';hint.textContent='👆 Двигай кепку';}
+  else{placeholder.style.display='flex';cv.style.display='block';hint.textContent='';}
 }
 
 function capturePhoto(){
-  // Capture video frame to canvas
   cv.width=v.videoWidth;
   cv.height=v.videoHeight;
+  log('capture: '+cv.width+'x'+cv.height);
   cx.save();
   cx.setTransform(-1,0,0,1,cv.width,0);
   cx.drawImage(v,0,0,cv.width,cv.height);
   cx.setTransform(1,0,0,1,0,0);
   cx.restore();
-  // Convert to image
   const data=cv.toDataURL('image/jpeg',0.9);
-  // Close camera
   closeCameraFn();
-  // Load captured photo
   loadPhoto(data);
 }
 
@@ -170,34 +201,22 @@ function resizeCanvas(){
 
 window.addEventListener('resize',()=>{resizeCanvas();redraw();});
 
-// Touch gestures
+// Touch
 let capStart=null;
 box.addEventListener('touchstart',e=>{
   if(!photoImg||v.style.display==='block')return;
   e.preventDefault();
   const t=e.touches;
-  if(t.length===1){
-    capStart={x:capX,y:capY,cx:t[0].clientX,cy:t[0].clientY};
-  }else if(t.length===2){
-    capStart={x:capX,y:capY,scale:capScale,angle:capAngle,
-      d:Math.hypot(t[1].clientX-t[0].clientX,t[1].clientY-t[0].clientY),
-      a:Math.atan2(t[1].clientY-t[0].clientY,t[1].clientX-t[0].clientX)};
-  }
+  if(t.length===1)capStart={x:capX,y:capY,cx:t[0].clientX,cy:t[0].clientY};
+  else if(t.length===2)capStart={x:capX,y:capY,scale:capScale,angle:capAngle,d:Math.hypot(t[1].clientX-t[0].clientX,t[1].clientY-t[0].clientY),a:Math.atan2(t[1].clientY-t[0].clientY,t[1].clientX-t[0].clientX)};
 },{passive:false});
 
 box.addEventListener('touchmove',e=>{
   if(!photoImg||!capStart)return;
   e.preventDefault();
   const t=e.touches;
-  if(t.length===1&&capStart.cx!==undefined){
-    capX=capStart.x+(t[0].clientX-capStart.cx)*photoImg.width/cv.width;
-    capY=capStart.y+(t[0].clientY-capStart.cy)*photoImg.height/cv.height;
-  }else if(t.length===2&&capStart.d!==undefined){
-    const d=Math.hypot(t[1].clientX-t[0].clientX,t[1].clientY-t[0].clientY);
-    const a=Math.atan2(t[1].clientY-t[0].clientY,t[1].clientX-t[0].clientX);
-    capScale=Math.max(0.3,Math.min(3,capStart.scale*d/capStart.d));
-    capAngle=capStart.angle+(a-capStart.a)*180/Math.PI;
-  }
+  if(t.length===1&&capStart.cx!==undefined){capX=capStart.x+(t[0].clientX-capStart.cx)*photoImg.width/cv.width;capY=capStart.y+(t[0].clientY-capStart.cy)*photoImg.height/cv.height;}
+  else if(t.length===2&&capStart.d!==undefined){const d=Math.hypot(t[1].clientX-t[0].clientX,t[1].clientY-t[0].clientY),a=Math.atan2(t[1].clientY-t[0].clientY,t[1].clientX-t[0].clientX);capScale=Math.max(0.3,Math.min(3,capStart.scale*d/capStart.d));capAngle=capStart.angle+(a-capStart.a)*180/Math.PI;}
   redraw();
 },{passive:false});
 
@@ -225,7 +244,6 @@ function redraw(){
   cx.restore();
 }
 
-// Download
 document.getElementById('downloadBtn').onclick=()=>{
   const a=document.createElement('a');
   a.download='primierka-kepki.png';a.href=cv.toDataURL('image/png');a.click();
